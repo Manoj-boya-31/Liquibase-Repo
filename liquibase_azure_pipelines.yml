@@ -1,0 +1,58 @@
+trigger:
+- main
+
+pool:
+  name: devops-agent
+  demands:
+    - Agent.Name -equals AKS-DEV-VM
+
+steps:
+- checkout: self
+  persistCredentials: true
+  fetchDepth: 0  # Important for git tagging to work!
+
+# Debug: Check repo files and paths
+- script: |
+    echo "Current Directory:"
+    pwd
+    echo "Repo Contents:"
+    ls -R $(Build.SourcesDirectory)
+  displayName: 'Debug Workspace'
+
+# Run Liquibase update (using VM-installed Liquibase)
+- script: |
+    echo "Running Liquibase Update..."
+    /opt/liquibase/liquibase --defaultsFile=liquibase.properties --dbclhistory-enabled=true --changeLogFile=changelogMain.xml update
+  displayName: 'Run Liquibase Update'
+
+# Show DATABASECHANGELOG metadata after update
+- script: |
+    echo "DATABASECHANGELOG Metadata:"
+    liquibase --changeLogFile=$(LIQUIBASE_CHANGELOG_FILE) history
+  workingDirectory: $(Build.SourcesDirectory)
+  displayName: 'Liquibase Change History'
+
+# Auto-increment Git tag & Push
+- script: |
+    echo "Fetching all tags..."
+    git fetch --tags
+    echo "Finding latest tag..."
+    latestTag=$(git describe --tags `git rev-list --tags --max-count=1`)
+    if [ -z "$latestTag" ]; then
+      echo "No tags found, starting at v1.0.0"
+      newTag="v1.0.0"
+    else
+      echo "Latest tag: $latestTag"
+      version=${latestTag#v}
+      IFS='.' read -r major minor patch <<< "$version"
+      # Increment patch
+      patch=$((patch + 1))
+      newTag="v$major.$minor.$patch"
+    fi
+    echo "New tag: $newTag"
+    git config user.email "you@example.com"
+    git config user.name "Your Name"
+    git tag $newTag
+    git push origin $newTag
+  workingDirectory: $(Build.SourcesDirectory)
+  displayName: 'Auto-Increment Semantic Version & Push Tag'

@@ -1,0 +1,72 @@
+//MODIFICATION OF DATA
+
+pipeline {
+    agent any
+
+    environment {
+        DB_URL = 'jdbc:sqlserver://ip-address;databaseName=;encrypt=true;trustServerCertificate=true'
+        DB_USERNAME = 'username'
+        DB_PASSWORD = 'password'
+        LIQUIBASE_HOME = 'C:\\Program Files\\liquibase'
+        CHANGELOG_PATH = 'C:\\ProgramData\\Jenkins\\.jenkins\\changelog-main.xml'
+        LIQUIBASE_LICENSE_KEY = 'your_license_key_here'
+    }
+
+    stages {
+        stage('Check Changelog Location') {
+            steps {
+                script {
+                    echo ' Checking if changelog file exists...'
+                    bat 'dir "C:\\ProgramData\\Jenkins\\.jenkins\\changelog-main.xml"'
+                    bat 'type "C:\\ProgramData\\Jenkins\\.jenkins\\changelog-main.xml"'
+
+                    // Define forbidden SQL commands directly
+                    def forbiddenCommands = ['ALTER', 'UPDATE', 'DROP']
+                    def forbiddenPattern = forbiddenCommands.join('|')
+                    echo " Forbidden SQL Commands: ${forbiddenCommands.join(', ')}"
+                    echo " Using regex pattern: ${forbiddenPattern}"
+
+                    // Ignore commented lines and then check for forbidden SQL commands
+                    echo ' Checking for forbidden SQL commands in changelog-main.xml (ignoring comments)...'
+                    def command = """
+                    powershell -Command "
+                        Get-Content 'C:\\ProgramData\\Jenkins\\.jenkins\\changelog-main.xml' |
+                        Where-Object { \$_ -notmatch '<!--' } |
+                        Select-String -Pattern '${forbiddenPattern}'
+                    "
+                    """
+                    def result = bat(script: command, returnStatus: true)
+
+                    if (result == 0) {
+                        error " Forbidden SQL command(s) (${forbiddenCommands.join(', ')}) detected in changelog-main.xml. Review and remove these commands."
+                    } else {
+                        echo " No forbidden SQL commands detected in changelog-main.xml."
+                    }
+                }
+            }
+        }
+
+        stage('Liquibase Update') {
+            steps {
+                script {
+                    echo ' Running Liquibase update...'
+                    bat """
+                    cd /d C:\\ProgramData\\Jenkins\\.jenkins\\
+                    \"${LIQUIBASE_HOME}\\liquibase.bat\" ^
+                    --url=\"${DB_URL}\" ^
+                    --username=\"${DB_USERNAME}\" ^
+                    --password=\"${DB_PASSWORD}\" ^
+                    --changeLogFile=\"changelog-main.xml\" ^
+                    update
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo ' Cleaning up after pipeline...'
+        }
+    }
+}
